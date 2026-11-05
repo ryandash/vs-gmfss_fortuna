@@ -6,14 +6,10 @@ from fractions import Fraction
 from threading import Lock
 
 import numpy as np
-import tensorrt
 import torch
 import torch.nn.functional as F
 import vapoursynth as vs
 from torch.nn import InstanceNorm2d
-from torch_tensorrt.fx import LowerSetting
-from torch_tensorrt.fx.lower import Lowerer
-from torch_tensorrt.fx.utils import LowerPrecision
 
 from .gmflow.transformer import FeatureTransformer
 from .GMFSS import GMFSS
@@ -51,9 +47,7 @@ def gmfss_fortuna(
     :param num_streams:             Number of CUDA streams to enqueue the kernels.
     :param trt:                     Use TensorRT for high-performance inference.
     :param trt_max_workspace_size:  Maximum workspace size for TensorRT engine.
-    :param trt_cache_path:          Path for TensorRT engine file. Engine will be cached when it's built for the first
-                                    time. Note each engine is created for specific settings such as model path/name,
-                                    precision, workspace etc, and specific GPUs and it's not portable.
+    :param trt_cache_path:          Deprecated compatibility parameter; the backend manages compiled engines.
     :param model:                   Model to use.
                                     0 = base model
                                     1 = union model
@@ -132,50 +126,29 @@ def gmfss_fortuna(
     ph = math.ceil(clip.height / tmp) * tmp
 
     if trt:
-        device_name = torch.cuda.get_device_name(device)
-        trt_version = tensorrt.__version__
-        dimensions = f"{pw}x{ph}"
-        precision = "fp16" if fp16 else "fp32"
-        trt_engine_path = os.path.join(
-            os.path.realpath(trt_cache_path),
-            (
-                f"gmfss_fortuna-{model_type}"
-                + f"_{device_name}"
-                + f"_trt-{trt_version}"
-                + f"_{dimensions}"
-                + f"_{precision}"
-                + f"_workspace-{trt_max_workspace_size}"
-                + f"_scale-{scale}"
-                + f"_ensemble-{ensemble}"
-                + ".pt"
-            ),
+        try:
+            import torch_tensorrt  # noqa: F401
+        except ImportError as exc:
+            raise vs.Error(
+                "gmfss_fortuna: TensorRT requested but Torch-TensorRT-RTX is not installed. "
+                "Install the optional 'tensorrt-rtx' dependency."
+            ) from exc
+
+        if not hasattr(torch, "compile"):
+            raise vs.Error("gmfss_fortuna: TensorRT-RTX requires PyTorch 2.0 or newer")
+
+        # The backend partitions supported operators into TensorRT engines;
+        # unsupported operators remain on the normal PyTorch execution path.
+        module = torch.compile(
+            module,
+            backend="tensorrt",
+            dynamic=False,
+            options={
+                "precision": torch.float16 if fp16 else torch.float32,
+                "workspace_size": int(trt_max_workspace_size),
+                "min_block_size": 1,
+            },
         )
-
-        if not os.path.isfile(trt_engine_path):
-            lower_setting = LowerSetting(
-                lower_precision=LowerPrecision.FP16 if fp16 else LowerPrecision.FP32,
-                min_acc_module_size=1,
-                leaf_module_list={FeatureTransformer, InstanceNorm2d},
-                max_workspace_size=trt_max_workspace_size,
-                dynamic_batch=False,
-                tactic_sources=1 << int(tensorrt.TacticSource.EDGE_MASK_CONVOLUTIONS)
-                | 1 << int(tensorrt.TacticSource.JIT_CONVOLUTIONS),
-            )
-            lowerer = Lowerer.create(lower_setting=lower_setting)
-            module = lowerer(
-                module,
-                [
-                    torch.zeros((1, 3, ph, pw), dtype=dtype, device=device).to(memory_format=torch.channels_last),
-                    torch.zeros((1, 3, ph, pw), dtype=dtype, device=device).to(memory_format=torch.channels_last),
-                    torch.zeros((1,), dtype=dtype, device=device),
-                ],
-            )
-            torch.save(module, trt_engine_path)
-
-        del module
-        torch.cuda.empty_cache()
-        module = [torch.load(trt_engine_path) for _ in range(num_streams)]
-
     if fps_num is not None and fps_den is not None:
         factor = Fraction(fps_num, fps_den) / clip.fps
         factor_num, factor_den = factor.as_integer_ratio()
