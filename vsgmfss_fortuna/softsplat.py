@@ -114,7 +114,7 @@ def cuda_kernel(strFunction:str, strKernel:str, objVariables:typing.Dict):
         # end
 
         while True:
-            objMatch = re.search('(SIZE_)([0-4])(\()([^\)]*)(\))', strKernel)
+            objMatch = re.search(r'(SIZE_)([0-4])(\()([^\)]*)(\))', strKernel)
 
             if objMatch is None:
                 break
@@ -129,7 +129,7 @@ def cuda_kernel(strFunction:str, strKernel:str, objVariables:typing.Dict):
         # end
 
         while True:
-            objMatch = re.search('(OFFSET_)([0-4])(\()', strKernel)
+            objMatch = re.search(r'(OFFSET_)([0-4])(\()', strKernel)
 
             if objMatch is None:
                 break
@@ -168,7 +168,7 @@ def cuda_kernel(strFunction:str, strKernel:str, objVariables:typing.Dict):
         # end
 
         while True:
-            objMatch = re.search('(VALUE_)([0-4])(\()', strKernel)
+            objMatch = re.search(r'(VALUE_)([0-4])(\()', strKernel)
 
             if objMatch is None:
                 break
