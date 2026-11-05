@@ -69,8 +69,10 @@ def local_correlation_softmax(feature0, feature1, local_radius,
 
     corr = torch.matmul(feature0_view, window_feature).view(b, h * w, -1) / (c ** 0.5)  # [B, H*W, (2R+1)^2]
 
-    # mask invalid locations
-    corr[~valid] = -1e9 if feature0.dtype == torch.float else -1e4
+    # Use an out-of-place mask operation; TensorRT's index_put converter
+    # cannot lower the boolean-indexed in-place assignment on this tensor.
+    mask_value = -1e9 if feature0.dtype == torch.float32 else -1e4
+    corr = torch.where(valid, corr, torch.full_like(corr, mask_value))
 
     prob = F.softmax(corr, -1)  # [B, H*W, (2R+1)^2]
 
