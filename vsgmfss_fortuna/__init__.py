@@ -46,7 +46,7 @@ def gmfss_fortuna(
     :param device_index:            Device ordinal of the GPU.
     :param num_streams:             Number of CUDA streams to enqueue the kernels.
     :param trt:                     Use TensorRT for high-performance inference.
-    :param trt_max_workspace_size:  Maximum workspace size for TensorRT engine.
+    :param trt_max_workspace_size:  Deprecated compatibility parameter; backend defaults are used.
     :param trt_cache_path:          Deprecated compatibility parameter; the backend manages compiled engines.
     :param model:                   Model to use.
                                     0 = base model
@@ -171,7 +171,7 @@ def gmfss_fortuna(
             timestep = torch.tensor([remainder / factor_num], dtype=dtype, device=device)
 
             if trt:
-                output = module[local_index](img0, img1, timestep)
+                output = module(img0, img1, timestep)
             else:
                 output = module(img0, img1, timestep)
 
