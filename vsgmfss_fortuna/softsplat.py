@@ -222,7 +222,13 @@ def cuda_launch(strKey:str):
         os.environ['CUDA_HOME'] = cupy.cuda.get_cuda_path()
     # end
 
-    return cupy.cuda.compile_with_cache(objCudacache[strKey]['strKernel'], tuple(['-I ' + os.environ['CUDA_HOME'], '-I ' + os.environ['CUDA_HOME'] + '/include'])).get_function(objCudacache[strKey]['strFunction'])
+    return cupy.RawModule(
+        code=objCudacache[strKey]['strKernel'],
+        options=(
+            '-I' + os.environ['CUDA_HOME'],
+            '-I' + os.path.join(os.environ['CUDA_HOME'], 'include')
+        )
+    ).get_function(objCudacache[strKey]['strFunction'])
 # end
 
 
@@ -281,7 +287,7 @@ def softsplat(tenIn:torch.Tensor, tenFlow:torch.Tensor, tenMetric:torch.Tensor, 
 
 class softsplat_func(torch.autograd.Function):
     @staticmethod
-    @torch.cuda.amp.custom_fwd(cast_inputs=torch.float32)
+    @torch.amp.custom_fwd(device_type="cuda", cast_inputs=torch.float32)
     def forward(self, tenIn, tenFlow):
         tenOut = tenIn.new_zeros([tenIn.shape[0], tenIn.shape[1], tenIn.shape[2], tenIn.shape[3]])
 
@@ -360,7 +366,7 @@ class softsplat_func(torch.autograd.Function):
     # end
 
     @staticmethod
-    @torch.cuda.amp.custom_bwd
+    @torch.amp.custom_bwd(device_type="cuda")
     def backward(self, tenOutgrad):
         tenIn, tenFlow = self.saved_tensors
 
