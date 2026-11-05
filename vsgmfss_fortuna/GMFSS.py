@@ -1,4 +1,5 @@
 import os
+from dataclasses import fields
 
 import torch
 import torch.nn as nn
@@ -32,6 +33,55 @@ class GMFSS(nn.Module):
         self.fusionnet.load_state_dict(torch.load(os.path.join(model_dir, f'fusionnet_{model_type}.pkl'), map_location='cpu'))
         self.model_type = model_type
         self.scale = scale
+        self._tensorrt_compiled = False
+
+    def compile_tensorrt(self, workspace_size=1 << 30):
+        """Compile each neural network independently with Torch-TensorRT.
+
+        GMFSS.forward stays in eager PyTorch so custom CuPy soft-splat kernels
+        and tensor orchestration are not captured into one oversized graph.
+        Each compiled component still consumes and returns CUDA tensors.
+        """
+        if self._tensorrt_compiled:
+            return
+
+        import torch_tensorrt
+
+        available_settings = {
+            field.name for field in fields(torch_tensorrt.dynamo.CompilationSettings)
+        }
+        requested_options = {
+            "workspace_size": int(workspace_size),
+            # A moderate search level avoids the most memory-intensive tactic
+            # search while retaining normal TensorRT graph optimizations.
+            "optimization_level": 3,
+            "num_avg_timing_iters": 1,
+        }
+        options = {
+            name: value
+            for name, value in requested_options.items()
+            if name in available_settings
+        }
+
+        components = ["feat_ext", "flownet", "metricnet"]
+        if self.model_type == "union":
+            components.append("ifnet")
+        components.append("fusionnet")
+
+        for name in components:
+            component = getattr(self, name)
+            setattr(
+                self,
+                name,
+                torch.compile(
+                    component,
+                    backend="tensorrt",
+                    dynamic=False,
+                    options=options,
+                ),
+            )
+
+        self._tensorrt_compiled = True
 
     def reuse(self, img0, img1):
         feat11, feat12, feat13 = self.feat_ext(img0)

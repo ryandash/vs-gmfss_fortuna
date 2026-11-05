@@ -43,15 +43,15 @@ def gmfss_fortuna(
     :param device_index:            Device ordinal of the GPU.
     :param num_streams:             Number of CUDA streams to enqueue the kernels.
     :param trt:                     Use TensorRT for high-performance inference.
-    :param trt_max_workspace_size:  Deprecated compatibility parameter; backend defaults are used.
-    :param trt_cache_path:          Deprecated compatibility parameter; the backend manages compiled engines.
+    :param trt_max_workspace_size:  Maximum TensorRT tactic workspace, in bytes, per compiled component.
+    :param trt_cache_path:          Reserved compatibility parameter; engine caching is managed by Torch-TensorRT.
     :param model:                   Model to use.
                                     0 = base model
                                     1 = union model
     :param factor_num:              Numerator of factor for target frame rate.
-                                    For example `factor_num=5, factor_den=2` will multiply the frame rate by 2.5.
+                                    For example, factor_num=5, factor_den=2 multiplies the frame rate by 2.5.
     :param factor_den:              Denominator of factor for target frame rate.
-    :param fps_num:                 Numerator of target frame rate. Override `factor_num` and `factor_den` if specified.
+    :param fps_num:                 Numerator of target frame rate. Override factor_num and factor_den if specified.
     :param fps_den:                 Denominator of target frame rate.
     :param scale:                   Control the process resolution for optical flow model. Try scale=0.5 for 4K video.
                                     Must be 0.25, 0.5, 1.0, 2.0, or 4.0.
@@ -76,7 +76,7 @@ def gmfss_fortuna(
         raise vs.Error("gmfss_fortuna: num_streams must be at least 1")
 
     if num_streams > vs.core.num_threads:
-        raise vs.Error("gmfss_fortuna: setting num_streams greater than `core.num_threads` is useless")
+        raise vs.Error("gmfss_fortuna: setting num_streams greater than core.num_threads is useless")
 
     if model not in range(2):
         raise vs.Error("gmfss_fortuna: model must be 0 or 1")
@@ -100,6 +100,9 @@ def gmfss_fortuna(
 
     if scale not in [0.25, 0.5, 1.0, 2.0, 4.0]:
         raise vs.Error("gmfss_fortuna: scale must be 0.25, 0.5, 1.0, 2.0, or 4.0")
+
+    if trt_max_workspace_size < 1:
+        raise vs.Error("gmfss_fortuna: trt_max_workspace_size must be positive")
 
     torch.set_float32_matmul_precision("high")
 
@@ -127,16 +130,17 @@ def gmfss_fortuna(
             import torch_tensorrt  # noqa: F401
         except ImportError as exc:
             raise vs.Error(
-                "gmfss_fortuna: TensorRT requested but Torch-TensorRT-RTX is not installed. "
+                "gmfss_fortuna: TensorRT requested but Torch-TensorRT is not installed. "
                 "Install the optional 'tensorrt-rtx' dependency."
             ) from exc
 
         if not hasattr(torch, "compile"):
-            raise vs.Error("gmfss_fortuna: TensorRT-RTX requires PyTorch 2.0 or newer")
+            raise vs.Error("gmfss_fortuna: TensorRT requires PyTorch 2.0 or newer")
 
-        # The backend partitions supported operators into TensorRT engines;
-        # unsupported operators remain on the normal PyTorch execution path.
-        module = torch.compile(module, backend="tensorrt", dynamic=False)
+        # Compile only the neural-network components. Keep GMFSS.forward and
+        # the custom CuPy soft-splat calls outside Dynamo/TensorRT.
+        module.compile_tensorrt(workspace_size=trt_max_workspace_size)
+
     if fps_num is not None and fps_den is not None:
         factor = Fraction(fps_num, fps_den) / clip.fps
         factor_num, factor_den = factor.as_integer_ratio()
