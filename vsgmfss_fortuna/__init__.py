@@ -9,9 +9,6 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 import vapoursynth as vs
-from torch.nn import InstanceNorm2d
-
-from .gmflow.transformer import FeatureTransformer
 from .GMFSS import GMFSS
 
 __version__ = "1.0.0"
@@ -170,10 +167,7 @@ def gmfss_fortuna(
 
             timestep = torch.tensor([remainder / factor_num], dtype=dtype, device=device)
 
-            if trt:
-                output = module(img0, img1, timestep)
-            else:
-                output = module(img0, img1, timestep)
+            output = module(img0, img1, timestep)
 
             output = F.interpolate(output, (clip.height, clip.width), mode="bilinear")
             return tensor_to_frame(output, f[0].copy())
