@@ -139,16 +139,7 @@ def gmfss_fortuna(
 
         # The backend partitions supported operators into TensorRT engines;
         # unsupported operators remain on the normal PyTorch execution path.
-        module = torch.compile(
-            module,
-            backend="tensorrt",
-            dynamic=False,
-            options={
-                "precision": torch.float16 if fp16 else torch.float32,
-                "workspace_size": int(trt_max_workspace_size),
-                "min_block_size": 1,
-            },
-        )
+        module = torch.compile(module, backend="tensorrt", dynamic=False)
     if fps_num is not None and fps_den is not None:
         factor = Fraction(fps_num, fps_den) / clip.fps
         factor_num, factor_den = factor.as_integer_ratio()
