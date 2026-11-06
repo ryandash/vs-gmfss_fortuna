@@ -35,6 +35,7 @@ def gmfss_fortuna(
     sc_threshold: float | None = None,
     trt: bool = False,
     trt_max_workspace_size: int = 1 << 30,
+    trt_cache_path: str | None = None,
 ) -> vs.VideoNode:
     """The All-In-One GMFSS: Dedicated for Anime Video Frame Interpolation
 
@@ -44,6 +45,7 @@ def gmfss_fortuna(
     :param num_streams:             Number of CUDA streams to enqueue the kernels.
     :param trt:                     Use optional Torch-TensorRT-RTX acceleration for selected network components.
     :param trt_max_workspace_size:  Maximum TensorRT tactic workspace, in bytes, per compiled component.
+    :param trt_cache_path:          Optional path to a persistent TensorRT timing-cache file.
     :param model:                   Model to use.
                                     0 = base model
                                     1 = union model
@@ -103,6 +105,14 @@ def gmfss_fortuna(
     if trt_max_workspace_size < 1:
         raise vs.Error("gmfss_fortuna: trt_max_workspace_size must be positive")
 
+    if trt_cache_path is not None:
+        if not isinstance(trt_cache_path, (str, os.PathLike)) or not os.fspath(trt_cache_path).strip():
+            raise vs.Error("gmfss_fortuna: trt_cache_path must be a non-empty path or None")
+        trt_cache_path = os.path.abspath(os.path.expanduser(os.fspath(trt_cache_path)))
+        cache_dir = os.path.dirname(trt_cache_path)
+        if cache_dir:
+            os.makedirs(cache_dir, exist_ok=True)
+
     if trt and not hasattr(torch, "compile"):
         raise vs.Error("gmfss_fortuna: TensorRT acceleration requires PyTorch 2.0 or newer")
 
@@ -125,7 +135,10 @@ def gmfss_fortuna(
 
     if trt:
         try:
-            module.compile_tensorrt(workspace_size=trt_max_workspace_size)
+            module.compile_tensorrt(
+                workspace_size=trt_max_workspace_size,
+                timing_cache_path=trt_cache_path,
+            )
         except RuntimeError as exc:
             raise vs.Error(f"gmfss_fortuna: TensorRT-RTX setup failed: {exc}") from exc
 
