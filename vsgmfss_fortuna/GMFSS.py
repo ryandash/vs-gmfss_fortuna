@@ -74,25 +74,16 @@ class GMFSS(nn.Module):
             "optimization_level": int(optimization_level),
             "num_avg_timing_iters": 1,
         }
-        # Runtime-cache configuration moved out of CompilationSettings in
-        # newer Torch-TensorRT releases. Prefer the compile-time setting when
-        # available; otherwise apply RuntimeSettings to each compiled module.
-        runtime_settings_type = None
-        apply_runtime_settings = None
-        use_runtime_settings_api = False
-        if runtime_cache_path is not None:
-            if "runtime_cache_path" in available_settings:
-                requested_options["runtime_cache_path"] = str(runtime_cache_path)
-            else:
-                try:
-                    import torch_tensorrt.runtime as runtime_api
-                except ImportError:
-                    runtime_api = None
-                runtime_settings_type = getattr(runtime_api, "RuntimeSettings", None)
-                apply_runtime_settings = getattr(runtime_api, "apply_runtime_settings", None)
-                use_runtime_settings_api = (
-                    runtime_settings_type is not None and apply_runtime_settings is not None
-                )
+        # Some Torch-TensorRT-RTX releases expose runtime_cache_path as a
+        # compile setting. Other releases expose only the runtime-settings API,
+        # which cannot be applied to torch.compile's lazy wrapper before its
+        # first inference has created TRT engines. In that case, retain the
+        # backend's default runtime cache rather than failing model setup.
+        runtime_cache_supported = runtime_cache_path is None or (
+            "runtime_cache_path" in available_settings
+        )
+        if runtime_cache_path is not None and runtime_cache_supported:
+            requested_options["runtime_cache_path"] = str(runtime_cache_path)
 
         base_options = {
             name: value
@@ -121,16 +112,6 @@ class GMFSS(nn.Module):
                 options=component_options,
             )
 
-            if runtime_cache_path is not None and use_runtime_settings_api:
-                try:
-                    settings = runtime_settings_type(runtime_cache=str(runtime_cache_path))
-                    apply_runtime_settings(compiled_component, settings)
-                except Exception as exc:
-                    raise RuntimeError(
-                        "Failed to apply the TensorRT-RTX runtime cache through "
-                        "torch_tensorrt.runtime.apply_runtime_settings()."
-                    ) from exc
-
             setattr(self, name, compiled_component)
 
         if runtime_cache_path is not None and not (
@@ -142,6 +123,19 @@ class GMFSS(nn.Module):
                 "This Torch-TensorRT version exposes neither CompilationSettings.runtime_cache_path "
                 "nor torch_tensorrt.runtime.apply_runtime_settings; TensorRT will use its default "
                 "runtime cache instead of trt_cache_dir.",
+                RuntimeWarning,
+                stacklevel=2,
+            )
+
+        if runtime_cache_path is not None and not runtime_cache_supported:
+            import warnings
+
+            warnings.warn(
+                "This Torch-TensorRT version does not expose runtime_cache_path "
+                "through CompilationSettings. Its runtime-settings API requires "
+                "already-created TensorRT engines and cannot be applied safely "
+                "to this lazy torch.compile backend during setup. Continuing with "
+                "the default TensorRT-RTX runtime cache; trt_cache_dir is ignored.",
                 RuntimeWarning,
                 stacklevel=2,
             )
