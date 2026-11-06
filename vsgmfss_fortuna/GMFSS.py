@@ -114,19 +114,6 @@ class GMFSS(nn.Module):
 
             setattr(self, name, compiled_component)
 
-        if runtime_cache_path is not None and not (
-            "runtime_cache_path" in available_settings or use_runtime_settings_api
-        ):
-            import warnings
-
-            warnings.warn(
-                "This Torch-TensorRT version exposes neither CompilationSettings.runtime_cache_path "
-                "nor torch_tensorrt.runtime.apply_runtime_settings; TensorRT will use its default "
-                "runtime cache instead of trt_cache_dir.",
-                RuntimeWarning,
-                stacklevel=2,
-            )
-
         if runtime_cache_path is not None and not runtime_cache_supported:
             import warnings
 
