@@ -11,16 +11,19 @@ torch.fx.wrap('forward_backward_consistency_check')
 backwarp_tenGrid = {}
 
 
-def backwarp(tenIn, tenflow):
-    if str(tenflow.shape) not in backwarp_tenGrid:
+def prepare_backwarp_grid(tenflow):
+    """Populate the grid cache before entering a torch.compile region."""
+    key = str(tenflow.shape)
+    if key not in backwarp_tenGrid:
         tenHor = torch.linspace(start=-1.0, end=1.0, steps=tenflow.shape[3], dtype=tenflow.dtype, device=tenflow.device).view(1, 1, 1, -1).repeat(1, 1, tenflow.shape[2], 1)
         tenVer = torch.linspace(start=-1.0, end=1.0, steps=tenflow.shape[2], dtype=tenflow.dtype, device=tenflow.device).view(1, 1, -1, 1).repeat(1, 1, 1, tenflow.shape[3])
+        backwarp_tenGrid[key] = torch.cat([tenHor, tenVer], 1)
+    return backwarp_tenGrid[key]
 
-        backwarp_tenGrid[str(tenflow.shape)] = torch.cat([tenHor, tenVer], 1)
-    # end
 
+def backwarp(tenIn, tenflow):
+    prepare_backwarp_grid(tenflow)
     tenflow = torch.cat([tenflow[:, 0:1, :, :] / ((tenIn.shape[3] - 1.0) / 2.0), tenflow[:, 1:2, :, :] / ((tenIn.shape[2] - 1.0) / 2.0)], 1)
-
     return torch.nn.functional.grid_sample(input=tenIn, grid=(backwarp_tenGrid[str(tenflow.shape)] + tenflow).permute(0, 2, 3, 1), mode='bilinear', padding_mode='zeros', align_corners=True)
 
 

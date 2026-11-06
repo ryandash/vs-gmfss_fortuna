@@ -33,6 +33,10 @@ def gmfss_fortuna(
     ensemble: bool = False,
     sc: bool = True,
     sc_threshold: float | None = None,
+    trt: bool = False,
+    trt_max_workspace_size: int = 1 << 30,
+    trt_cache_dir: str | None = None,
+    trt_optimization_level: int = 3,
 ) -> vs.VideoNode:
     """The All-In-One GMFSS: Dedicated for Anime Video Frame Interpolation
 
@@ -40,6 +44,10 @@ def gmfss_fortuna(
                                     RGBH performs inference in FP16 mode while RGBS performs inference in FP32 mode.
     :param device_index:            Device ordinal of the GPU.
     :param num_streams:             Number of CUDA streams to enqueue the kernels.
+    :param trt:                     Use optional Torch-TensorRT-RTX acceleration for selected network components.
+    :param trt_max_workspace_size:  Maximum TensorRT tactic workspace, in bytes, per compiled component.
+    :param trt_cache_dir:           Optional directory for serialized TensorRT engine files, keyed by model, shape, dtype, GPU, and builder configuration.
+    :param trt_optimization_level:  TensorRT builder optimization level, from 0 (fastest build) to 5 (longest build / potentially fastest engine).
     :param model:                   Model to use.
                                     0 = base model
                                     1 = union model
@@ -96,6 +104,20 @@ def gmfss_fortuna(
     if scale not in [0.25, 0.5, 1.0, 2.0, 4.0]:
         raise vs.Error("gmfss_fortuna: scale must be 0.25, 0.5, 1.0, 2.0, or 4.0")
 
+    if trt_max_workspace_size < 1:
+        raise vs.Error("gmfss_fortuna: trt_max_workspace_size must be positive")
+
+    if trt_optimization_level not in range(6):
+        raise vs.Error("gmfss_fortuna: trt_optimization_level must be between 0 and 5")
+
+    if trt_cache_dir is not None:
+        if not isinstance(trt_cache_dir, (str, os.PathLike)) or not os.fspath(trt_cache_dir).strip():
+            raise vs.Error("gmfss_fortuna: trt_cache_dir must be a non-empty directory path or None")
+        trt_cache_dir = os.path.abspath(os.path.expanduser(os.fspath(trt_cache_dir)))
+
+    if trt and not hasattr(torch, "compile"):
+        raise vs.Error("gmfss_fortuna: TensorRT acceleration requires PyTorch 2.0 or newer")
+
     torch.set_float32_matmul_precision("high")
 
     fp16 = clip.format.bits_per_sample == 16
@@ -116,6 +138,18 @@ def gmfss_fortuna(
     tmp = max(64, int(64 / scale))
     pw = math.ceil(clip.width / tmp) * tmp
     ph = math.ceil(clip.height / tmp) * tmp
+
+    if trt:
+        try:
+            module.compile_tensorrt(
+                input_height=ph,
+                input_width=pw,
+                cache_dir=trt_cache_dir,
+                workspace_size=trt_max_workspace_size,
+                optimization_level=trt_optimization_level,
+            )
+        except Exception as exc:
+            raise vs.Error(f"gmfss_fortuna: TensorRT-RTX setup failed: {exc}") from exc
 
     if fps_num is not None and fps_den is not None:
         factor = Fraction(fps_num, fps_den) / clip.fps

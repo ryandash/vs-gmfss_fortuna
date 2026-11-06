@@ -24,6 +24,9 @@ dependencies = [
   "VapourSynth>=55"
 ]
 
+[project.optional-dependencies]
+tensorrt-rtx = ["torch-tensorrt-rtx"]
+
 [project.urls]
 "Homepage" = "https://github.com/HolyWu/vs-gmfss_fortuna"
 "Bug Tracker" = "https://github.com/HolyWu/vs-gmfss_fortuna/issues"
