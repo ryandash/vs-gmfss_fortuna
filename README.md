@@ -40,7 +40,7 @@ python -c "import torch_tensorrt, tensorrt_rtx; print('Torch-TensorRT:', torch_t
 
 When `trt=True`, the plugin compiles FeatureNet, MetricNet, and GridNet as separate static-shape TensorRT modules through `torch.compile(..., backend="tensorrt")`. The first inference triggers compilation. Intermediate tensors remain on the GPU.
 
-GMFlow, IFNet, GMFSS frame orchestration, and custom CuPy soft-splat kernels remain on the normal PyTorch/CUDA path. This conservative component allowlist avoids capturing the more complex optical-flow and custom-kernel portions of the model. TensorRT may still leave unsupported operators in PyTorch, depending on the installed backend's lowering and fallback behavior.
+Feature extraction for the two input frames is batched into one FeatureNet call. GMFlow is also invoked once in its native bidirectional mode, sharing the image-backbone pass and producing forward/backward flow together. These changes reduce duplicated module invocations; benchmark on the target GPU because the larger batch can change peak memory and kernel selection. GMFlow, IFNet, GMFSS frame orchestration, and custom CuPy soft-splat kernels remain on the normal PyTorch/CUDA path. This conservative component allowlist avoids capturing the more complex optical-flow and custom-kernel portions of the model. TensorRT may still leave unsupported operators in PyTorch, depending on the installed backend's lowering and fallback behavior.
 
 The `trt_max_workspace_size` argument sets the per-component tactic workspace when supported by the installed Torch-TensorRT version. It defaults to 1 GiB. Torch-TensorRT options are version-dependent; the implementation only passes settings exposed by the installed version.
 
