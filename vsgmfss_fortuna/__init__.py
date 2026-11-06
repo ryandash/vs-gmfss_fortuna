@@ -33,6 +33,8 @@ def gmfss_fortuna(
     ensemble: bool = False,
     sc: bool = True,
     sc_threshold: float | None = None,
+    trt: bool = False,
+    trt_max_workspace_size: int = 1 << 30,
 ) -> vs.VideoNode:
     """The All-In-One GMFSS: Dedicated for Anime Video Frame Interpolation
 
@@ -40,6 +42,8 @@ def gmfss_fortuna(
                                     RGBH performs inference in FP16 mode while RGBS performs inference in FP32 mode.
     :param device_index:            Device ordinal of the GPU.
     :param num_streams:             Number of CUDA streams to enqueue the kernels.
+    :param trt:                     Use optional Torch-TensorRT-RTX acceleration for selected network components.
+    :param trt_max_workspace_size:  Maximum TensorRT tactic workspace, in bytes, per compiled component.
     :param model:                   Model to use.
                                     0 = base model
                                     1 = union model
@@ -96,6 +100,12 @@ def gmfss_fortuna(
     if scale not in [0.25, 0.5, 1.0, 2.0, 4.0]:
         raise vs.Error("gmfss_fortuna: scale must be 0.25, 0.5, 1.0, 2.0, or 4.0")
 
+    if trt_max_workspace_size < 1:
+        raise vs.Error("gmfss_fortuna: trt_max_workspace_size must be positive")
+
+    if trt and not hasattr(torch, "compile"):
+        raise vs.Error("gmfss_fortuna: TensorRT acceleration requires PyTorch 2.0 or newer")
+
     torch.set_float32_matmul_precision("high")
 
     fp16 = clip.format.bits_per_sample == 16
@@ -112,6 +122,12 @@ def gmfss_fortuna(
     module.eval().to(device, memory_format=torch.channels_last)
     if fp16:
         module.half()
+
+    if trt:
+        try:
+            module.compile_tensorrt(workspace_size=trt_max_workspace_size)
+        except RuntimeError as exc:
+            raise vs.Error(f"gmfss_fortuna: TensorRT-RTX setup failed: {exc}") from exc
 
     tmp = max(64, int(64 / scale))
     pw = math.ceil(clip.width / tmp) * tmp
