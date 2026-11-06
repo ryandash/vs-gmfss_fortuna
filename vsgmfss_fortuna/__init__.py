@@ -117,8 +117,6 @@ def gmfss_fortuna(
         raise vs.Error("gmfss_fortuna: TensorRT acceleration requires PyTorch 2.0 or newer")
 
     torch.set_float32_matmul_precision("high")
-    # Padded inference dimensions are stable, so benchmark cuDNN algorithms.
-    torch.backends.cudnn.benchmark = True
 
     fp16 = clip.format.bits_per_sample == 16
     dtype = torch.half if fp16 else torch.float
