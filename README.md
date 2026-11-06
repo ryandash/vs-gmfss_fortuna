@@ -10,7 +10,7 @@ The All-In-One GMFSS: Dedicated for Anime Video Frame Interpolation, based on ht
 
 Inference uses PyTorch with CUDA acceleration.
 
-For Windows installation, see the [VapourSynth releases](https://github.com/HolyWu/vs-gmfss_fortuna/releases) for packaged builds where available. CuPy requires a compatible CUDA runtime.
+For Windows installation, see the [VapourSynth releases](https://github.com/HolyWu/vs-gmfss_fortuna/releases) for packaged builds where available. CuPy 14 requires CUDA 12 or later and NumPy 2 or later. The package dependency installs the CUDA 12.x CuPy build; use the matching CuPy package for other supported CUDA major versions.
 
 ## Installation
 
