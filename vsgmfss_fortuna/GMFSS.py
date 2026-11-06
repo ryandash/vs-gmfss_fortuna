@@ -35,7 +35,7 @@ class GMFSS(nn.Module):
         self.scale = scale
         self._tensorrt_compiled = False
 
-    def compile_tensorrt(self, workspace_size=1 << 30, timing_cache_path=None, optimization_level=3):
+    def compile_tensorrt(self, workspace_size=1 << 30, runtime_cache_path=None, optimization_level=3):
         """Enable the optional Torch-TensorRT-RTX backend for selected modules.
 
         GMFlow, IFNet, frame orchestration, and CuPy soft-splat remain eager.
@@ -74,8 +74,13 @@ class GMFSS(nn.Module):
             "optimization_level": int(optimization_level),
             "num_avg_timing_iters": 1,
         }
-        if timing_cache_path is not None:
-            requested_options["timing_cache_path"] = str(timing_cache_path)
+        if runtime_cache_path is not None:
+            if "runtime_cache_path" not in available_settings:
+                raise RuntimeError(
+                    "The installed Torch-TensorRT version does not expose runtime_cache_path "
+                    "through CompilationSettings. TensorRT-RTX runtime caching cannot be configured."
+                )
+            requested_options["runtime_cache_path"] = str(runtime_cache_path)
 
         base_options = {
             name: value
