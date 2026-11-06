@@ -86,16 +86,16 @@ class GMFSS(nn.Module):
                             memory_format=torch.channels_last),
             ),
             "metricnet": (
-                torch.randn((1, 3, h2, w2), device=device, dtype=dtype, memory_format=torch.channels_last),
-                torch.randn((1, 3, h2, w2), device=device, dtype=dtype, memory_format=torch.channels_last),
-                torch.randn((1, 2, h2, w2), device=device, dtype=dtype, memory_format=torch.channels_last),
-                torch.randn((1, 2, h2, w2), device=device, dtype=dtype, memory_format=torch.channels_last),
+                torch.randn((1, 3, h2, w2), device=device, dtype=dtype).contiguous(memory_format=torch.channels_last),
+                torch.randn((1, 3, h2, w2), device=device, dtype=dtype).contiguous(memory_format=torch.channels_last),
+                torch.randn((1, 2, h2, w2), device=device, dtype=dtype).contiguous(memory_format=torch.channels_last),
+                torch.randn((1, 2, h2, w2), device=device, dtype=dtype).contiguous(memory_format=torch.channels_last),
             ),
             "fusionnet": (
-                torch.randn((1, 12 if self.model_type == "base" else 9, h2, w2), device=device, dtype=dtype, memory_format=torch.channels_last),
-                torch.randn((1, 128, h2, w2), device=device, dtype=dtype, memory_format=torch.channels_last),
-                torch.randn((1, 256, h4, w4), device=device, dtype=dtype, memory_format=torch.channels_last),
-                torch.randn((1, 384, h8, w8), device=device, dtype=dtype, memory_format=torch.channels_last),
+                torch.randn((1, 12 if self.model_type == "base" else 9, h2, w2), device=device, dtype=dtype).contiguous(memory_format=torch.channels_last),
+                torch.randn((1, 128, h2, w2), device=device, dtype=dtype).contiguous(memory_format=torch.channels_last),
+                torch.randn((1, 256, h4, w4), device=device, dtype=dtype).contiguous(memory_format=torch.channels_last),
+                torch.randn((1, 384, h8, w8), device=device, dtype=dtype).contiguous(memory_format=torch.channels_last),
             ),
         }
 
