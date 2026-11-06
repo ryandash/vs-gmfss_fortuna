@@ -6,16 +6,10 @@ from fractions import Fraction
 from threading import Lock
 
 import numpy as np
-import tensorrt
 import torch
 import torch.nn.functional as F
 import vapoursynth as vs
-from torch.nn import InstanceNorm2d
-from torch_tensorrt.fx import LowerSetting
-from torch_tensorrt.fx.lower import Lowerer
-from torch_tensorrt.fx.utils import LowerPrecision
 
-from .gmflow.transformer import FeatureTransformer
 from .GMFSS import GMFSS
 
 __version__ = "1.0.0"
@@ -30,9 +24,6 @@ def gmfss_fortuna(
     clip: vs.VideoNode,
     device_index: int | None = None,
     num_streams: int = 1,
-    trt: bool = False,
-    trt_max_workspace_size: int = 1 << 30,
-    trt_cache_path: str = model_dir,
     model: int = 0,
     factor_num: int = 2,
     factor_den: int = 1,
@@ -49,11 +40,6 @@ def gmfss_fortuna(
                                     RGBH performs inference in FP16 mode while RGBS performs inference in FP32 mode.
     :param device_index:            Device ordinal of the GPU.
     :param num_streams:             Number of CUDA streams to enqueue the kernels.
-    :param trt:                     Use TensorRT for high-performance inference.
-    :param trt_max_workspace_size:  Maximum workspace size for TensorRT engine.
-    :param trt_cache_path:          Path for TensorRT engine file. Engine will be cached when it's built for the first
-                                    time. Note each engine is created for specific settings such as model path/name,
-                                    precision, workspace etc, and specific GPUs and it's not portable.
     :param model:                   Model to use.
                                     0 = base model
                                     1 = union model
@@ -131,51 +117,6 @@ def gmfss_fortuna(
     pw = math.ceil(clip.width / tmp) * tmp
     ph = math.ceil(clip.height / tmp) * tmp
 
-    if trt:
-        device_name = torch.cuda.get_device_name(device)
-        trt_version = tensorrt.__version__
-        dimensions = f"{pw}x{ph}"
-        precision = "fp16" if fp16 else "fp32"
-        trt_engine_path = os.path.join(
-            os.path.realpath(trt_cache_path),
-            (
-                f"gmfss_fortuna-{model_type}"
-                + f"_{device_name}"
-                + f"_trt-{trt_version}"
-                + f"_{dimensions}"
-                + f"_{precision}"
-                + f"_workspace-{trt_max_workspace_size}"
-                + f"_scale-{scale}"
-                + f"_ensemble-{ensemble}"
-                + ".pt"
-            ),
-        )
-
-        if not os.path.isfile(trt_engine_path):
-            lower_setting = LowerSetting(
-                lower_precision=LowerPrecision.FP16 if fp16 else LowerPrecision.FP32,
-                min_acc_module_size=1,
-                leaf_module_list={FeatureTransformer, InstanceNorm2d},
-                max_workspace_size=trt_max_workspace_size,
-                dynamic_batch=False,
-                tactic_sources=1 << int(tensorrt.TacticSource.EDGE_MASK_CONVOLUTIONS)
-                | 1 << int(tensorrt.TacticSource.JIT_CONVOLUTIONS),
-            )
-            lowerer = Lowerer.create(lower_setting=lower_setting)
-            module = lowerer(
-                module,
-                [
-                    torch.zeros((1, 3, ph, pw), dtype=dtype, device=device).to(memory_format=torch.channels_last),
-                    torch.zeros((1, 3, ph, pw), dtype=dtype, device=device).to(memory_format=torch.channels_last),
-                    torch.zeros((1,), dtype=dtype, device=device),
-                ],
-            )
-            torch.save(module, trt_engine_path)
-
-        del module
-        torch.cuda.empty_cache()
-        module = [torch.load(trt_engine_path) for _ in range(num_streams)]
-
     if fps_num is not None and fps_den is not None:
         factor = Fraction(fps_num, fps_den) / clip.fps
         factor_num, factor_den = factor.as_integer_ratio()
@@ -206,10 +147,7 @@ def gmfss_fortuna(
 
             timestep = torch.tensor([remainder / factor_num], dtype=dtype, device=device)
 
-            if trt:
-                output = module[local_index](img0, img1, timestep)
-            else:
-                output = module(img0, img1, timestep)
+            output = module(img0, img1, timestep)
 
             output = F.interpolate(output, (clip.height, clip.width), mode="bilinear")
             return tensor_to_frame(output, f[0].copy())
