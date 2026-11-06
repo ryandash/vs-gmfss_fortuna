@@ -222,7 +222,16 @@ def cuda_launch(strKey:str):
         os.environ['CUDA_HOME'] = cupy.cuda.get_cuda_path()
     # end
 
-    return cupy.cuda.compile_with_cache(objCudacache[strKey]['strKernel'], tuple(['-I ' + os.environ['CUDA_HOME'], '-I ' + os.environ['CUDA_HOME'] + '/include'])).get_function(objCudacache[strKey]['strFunction'])
+    cuda_home = os.environ['CUDA_HOME']
+    module = cupy.RawModule(
+        code=objCudacache[strKey]['strKernel'],
+        options=(
+            '-I' + cuda_home,
+            '-I' + os.path.join(cuda_home, 'include'),
+        ),
+        name_expressions=(objCudacache[strKey]['strFunction'],),
+    )
+    return module.get_function(objCudacache[strKey]['strFunction'])
 # end
 
 
