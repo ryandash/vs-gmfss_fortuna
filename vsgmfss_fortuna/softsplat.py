@@ -229,7 +229,6 @@ def cuda_launch(strKey:str):
             '-I' + cuda_home,
             '-I' + os.path.join(cuda_home, 'include'),
         ),
-        name_expressions=(objCudacache[strKey]['strFunction'],),
     )
     return module.get_function(objCudacache[strKey]['strFunction'])
 # end
