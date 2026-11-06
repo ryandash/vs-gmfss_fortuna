@@ -84,7 +84,10 @@ class GMFSS(nn.Module):
             if "runtime_cache_path" in available_settings:
                 requested_options["runtime_cache_path"] = str(runtime_cache_path)
             else:
-                runtime_api = getattr(torch_tensorrt, "runtime", None)
+                try:
+                    import torch_tensorrt.runtime as runtime_api
+                except ImportError:
+                    runtime_api = None
                 runtime_settings_type = getattr(runtime_api, "RuntimeSettings", None)
                 apply_runtime_settings = getattr(runtime_api, "apply_runtime_settings", None)
                 use_runtime_settings_api = (
