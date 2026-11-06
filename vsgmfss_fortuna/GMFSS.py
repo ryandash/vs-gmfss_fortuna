@@ -151,7 +151,10 @@ class GMFSS(nn.Module):
             }
             compiled_component = torch_tensorrt.dynamo.compile(
                 exported,
-                inputs=component_inputs,
+                component_inputs,
+                device=device,
+                min_block_size=1,
+                use_explicit_typing=True,
                 **compile_options,
             ).eval()
 
