@@ -199,7 +199,7 @@ class GMFSS(nn.Module):
 
                 # Use the serialized artifact for this run too, ensuring that
                 # cache load and cache creation follow the same execution path.
-                compiled_component = torch.jit.load(engine_path, map_location=device).eval()
+                compiled_component = torch.export.load(engine_path).module().eval()
 
             setattr(self, name, compiled_component)
 
