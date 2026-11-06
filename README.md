@@ -46,6 +46,23 @@ The `trt_max_workspace_size` argument sets the per-component tactic workspace wh
 
 TensorRT-RTX acceleration is opt-in. If engine compilation or inference fails, remove `trt=True` to use the standard PyTorch/CUDA path. A successful render does not by itself prove that all operations were converted to TensorRT; verify engine compilation and benchmark against the PyTorch baseline.
 
+
+### Troubleshooting a missing TensorRT backend
+
+After installing the RTX extra, verify that importing Torch-TensorRT succeeds and registers the `tensorrt` Dynamo backend:
+
+```powershell
+python -c "import torch; import torch_tensorrt; import tensorrt_rtx; print('Torch:', torch.__version__); print('Torch-TensorRT:', torch_tensorrt.__file__); print('TensorRT-RTX:', tensorrt_rtx.__file__); print('Backends:', torch._dynamo.list_backends())"
+```
+
+The backend list should include `tensorrt`. If `torch_tensorrt` imports as a namespace package (for example, `torch_tensorrt.__file__` is `None`) or its package files are missing, the wheel may have been incompletely installed. Reinstall the **same version already selected for the environment** without changing its dependencies:
+
+```powershell
+python -m pip install --force-reinstall --no-deps --no-cache-dir "torch-tensorrt-rtx==<installed-version>" --extra-index-url https://download.pytorch.org/whl/nightly/cu132
+```
+
+Replace `<installed-version>` with the exact version reported by `python -m pip show torch-tensorrt-rtx`. Then rerun the import/backend check. Do not change the `backend="tensorrt"` setting in the plugin to work around a missing registration; that registration is provided by importing `torch_tensorrt`.
+
 ## Usage
 
 ```python
