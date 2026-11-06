@@ -37,13 +37,15 @@ The RTX 5070 Ti uses NVIDIA Blackwell (compute capability 12.0). For the optiona
 
 ## TensorRT component compilation
 
-When trt=True, the plugin compiles FeatureNet, GMFlow, MetricNet, IFNet (union model only), and GridNet as separate static-shape TensorRT modules. The GMFSS frame orchestration and custom CuPy soft-splat operations remain in eager PyTorch. Intermediate tensors stay on the GPU; the component boundaries do not require host copies.
+When trt=True, the plugin compiles FeatureNet, MetricNet, and GridNet as separate static-shape TensorRT modules. GMFlow (including correlation, warping, and convex flow upsampling), IFNet, GMFSS frame orchestration, and custom CuPy soft-splat operations remain in eager PyTorch. Intermediate tensors stay on the GPU; component boundaries do not require host copies.
 
-Separate compilation reduces the size of each TensorRT graph and its peak tactic-building workspace compared with compiling the complete GMFSS forward graph as one unit. It does not guarantee that every component will compile on every GPU or input size. The first inference triggers compilation of the component engines.
+This is an intentionally conservative allowlist. GMFlow contains large correlation and flow-refinement graphs that have triggered expensive or unsuccessful TensorRT tactic builds on the target RTX GPU. IFNet remains eager until it has independent correctness and performance coverage. Only components selected by the allowlist are wrapped with torch.compile.
 
-The trt_max_workspace_size argument controls the maximum TensorRT tactic workspace in bytes for each component (default: 1 GiB). A smaller workspace may avoid out-of-memory failures but can restrict TensorRT's tactic choices and reduce runtime performance. If an individual component still fails to compile, inspect the TensorRT conversion log for that component. Unsupported operators can otherwise be executed by the PyTorch fallback path, so a successful frame render alone does not prove every component was converted to TensorRT.
+The first inference triggers compilation of the selected component engines. The plugin explicitly sets each engine's permitted precision to match that component's parameter dtype (FP16 for RGBH input and FP32 for RGBS input), rather than relying on Torch-TensorRT's default precision setting.
 
-TensorRT-RTX compilation is experimental in Torch-TensorRT. Actual acceleration, numerical parity, memory use, and performance must be verified on the target GPU. If TensorRT compilation fails, call gmfss_fortuna(clip, trt=False) to use the regular PyTorch path.
+The trt_max_workspace_size argument controls the maximum TensorRT tactic workspace in bytes for each compiled component (default: 1 GiB). A smaller workspace may restrict tactic choices and reduce runtime performance. Unsupported operators inside a selected component may still execute through PyTorch fallback, so a successful frame render alone does not prove every operation was converted to TensorRT.
+
+TensorRT-RTX is distinct from the standard TensorRT Python package. The optional extra installs Torch-TensorRT-RTX; the Python import name remains torch_tensorrt for either distribution. Check the installed package flavor and its PyTorch/CUDA compatibility before using the RTX extra. Actual acceleration, numerical parity, memory use, and performance must be verified on the target GPU. If TensorRT compilation fails, use gmfss_fortuna(clip, trt=False) for the regular PyTorch path.
 
 ## Installation
 
