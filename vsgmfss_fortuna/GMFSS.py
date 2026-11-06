@@ -32,6 +32,7 @@ class GMFSS(nn.Module):
         self.feat_ext.load_state_dict(torch.load(os.path.join(model_dir, f'feat_{model_type}.pkl'), map_location='cpu'))
         self.fusionnet.load_state_dict(torch.load(os.path.join(model_dir, f'fusionnet_{model_type}.pkl'), map_location='cpu'))
         self.model_type = model_type
+        self.model_dir = model_dir
         self.scale = scale
         self._tensorrt_compiled = False
 
@@ -104,8 +105,20 @@ class GMFSS(nn.Module):
         for name in ("feat_ext", "metricnet", "fusionnet"):
             component = getattr(self, name).eval()
             component_inputs = examples[name]
+            checkpoint_names = {
+                "feat_ext": f"feat_{self.model_type}.pkl",
+                "metricnet": f"metric_{self.model_type}.pkl",
+                "fusionnet": f"fusionnet_{self.model_type}.pkl",
+            }
+            checkpoint_path = os.path.join(self.model_dir, checkpoint_names[name])
+            checkpoint_hash = hashlib.sha256()
+            with open(checkpoint_path, "rb") as checkpoint_file:
+                for chunk in iter(lambda: checkpoint_file.read(1024 * 1024), b""):
+                    checkpoint_hash.update(chunk)
+
             cache_identity = {
                 "component": name,
+                "weights_sha256": checkpoint_hash.hexdigest(),
                 "model": self.model_type,
                 "shape": [list(t.shape) for t in component_inputs],
                 "dtype": str(dtype),
