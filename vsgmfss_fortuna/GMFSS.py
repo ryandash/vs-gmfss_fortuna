@@ -8,7 +8,7 @@ import torch.nn.functional as F
 from .FeatureNet import FeatureNet
 from .gmflow.gmflow import GMFlow
 from .IFNet_HDv3 import IFNet
-from .MetricNet import MetricNet
+from .MetricNet import MetricNet, prepare_backwarp_grid
 from .softsplat import softsplat as warp
 
 torch.fx.wrap('warp')
@@ -138,6 +138,8 @@ class GMFSS(nn.Module):
             flow01 = F.interpolate(flow01, scale_factor = 1. / self.scale, mode="bilinear") / self.scale
             flow10 = F.interpolate(flow10, scale_factor = 1. / self.scale, mode="bilinear") / self.scale
 
+        # Populate the grid cache before Dynamo traces the compiled MetricNet.
+        prepare_backwarp_grid(flow01)
         metric0, metric1 = self.metricnet(img0, img1, flow01, flow10)
 
         return flow01, flow10, metric0, metric1, feat_ext0, feat_ext1
