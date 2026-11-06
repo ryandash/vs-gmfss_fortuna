@@ -8,7 +8,7 @@ The All-In-One GMFSS: Dedicated for Anime Video Frame Interpolation, based on ht
 - [PyTorch](https://pytorch.org/get-started)
 - [VapourSynth](http://www.vapoursynth.com/) R55+
 
-This project uses the standard PyTorch CUDA inference path. TensorRT and Torch-TensorRT are not used or required.
+Inference uses PyTorch with CUDA acceleration.
 
 For Windows installation, see the [VapourSynth releases](https://github.com/HolyWu/vs-gmfss_fortuna/releases) for packaged builds where available. CuPy requires a compatible CUDA runtime.
 
