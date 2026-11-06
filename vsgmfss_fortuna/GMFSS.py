@@ -73,8 +73,10 @@ class GMFSS(nn.Module):
             "workspace_size": int(workspace_size),
             "optimization_level": 1,
             "num_avg_timing_iters": 1,
-            "timing_cache_path": timing_cache_path,
         }
+        if timing_cache_path is not None:
+            requested_options["timing_cache_path"] = str(timing_cache_path)
+
         base_options = {
             name: value
             for name, value in requested_options.items()
