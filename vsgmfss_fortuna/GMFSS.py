@@ -108,10 +108,15 @@ class GMFSS(nn.Module):
         self._tensorrt_compiled = True
 
     def reuse(self, img0, img1):
-        feat11, feat12, feat13 = self.feat_ext(img0)
-        feat21, feat22, feat23 = self.feat_ext(img1)
-        feat_ext0 = [feat11, feat12, feat13]
-        feat_ext1 = [feat21, feat22, feat23]
+        # FeatureNet is fully convolutional and both frames have identical
+        # shapes. A single batch-2 invocation reduces Python/dispatcher and
+        # kernel-launch overhead compared with two batch-1 calls.
+        features = self.feat_ext(torch.cat((img0, img1), dim=0))
+        feat_ext0, feat_ext1 = [], []
+        for feature in features:
+            feat0, feat1 = torch.chunk(feature, 2, dim=0)
+            feat_ext0.append(feat0)
+            feat_ext1.append(feat1)
 
         img0 = F.interpolate(img0, scale_factor = 0.5, mode="bilinear")
         img1 = F.interpolate(img1, scale_factor = 0.5, mode="bilinear")
@@ -122,8 +127,13 @@ class GMFSS(nn.Module):
         else:
             imgf0 = img0
             imgf1 = img1
-        flow01 = self.flownet(imgf0, imgf1)
-        flow10 = self.flownet(imgf1, imgf0)
+
+        # GMFlow has a native bidirectional mode. It shares the image
+        # backbone pass and derives the reverse global correlation by
+        # transposing the forward correlation matrix.
+        flow_bidir = self.flownet(imgf0, imgf1, pred_bidir_flow=True)
+        flow01, flow10 = torch.chunk(flow_bidir, 2, dim=0)
+
         if self.scale != 1.0:
             flow01 = F.interpolate(flow01, scale_factor = 1. / self.scale, mode="bilinear") / self.scale
             flow10 = F.interpolate(flow10, scale_factor = 1. / self.scale, mode="bilinear") / self.scale
