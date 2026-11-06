@@ -35,7 +35,7 @@ class GMFSS(nn.Module):
         self.scale = scale
         self._tensorrt_compiled = False
 
-    def compile_tensorrt(self, workspace_size=1 << 30, timing_cache_path=None):
+    def compile_tensorrt(self, workspace_size=1 << 30, timing_cache_path=None, optimization_level=3):
         """Enable the optional Torch-TensorRT-RTX backend for selected modules.
 
         GMFlow, IFNet, frame orchestration, and CuPy soft-splat remain eager.
@@ -71,7 +71,7 @@ class GMFSS(nn.Module):
 
         requested_options = {
             "workspace_size": int(workspace_size),
-            "optimization_level": 1,
+            "optimization_level": int(optimization_level),
             "num_avg_timing_iters": 1,
         }
         if timing_cache_path is not None:
