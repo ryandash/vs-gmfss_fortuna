@@ -15,13 +15,13 @@ torch.fx.wrap('warp')
 
 
 class GMFSS(nn.Module):
-    def __init__(self, model_dir, model_type, scale, ensemble):
+    def __init__(self, model_dir, model_type, scale):
         super(GMFSS, self).__init__()
         if model_type == 'base':
             from .FusionNet_b import GridNet
         else:
             from .FusionNet_u import GridNet
-            self.ifnet = IFNet(ensemble)
+            self.ifnet = IFNet()
             self.ifnet.load_state_dict(torch.load(os.path.join(model_dir, 'rife.pkl'), map_location='cpu'))
         self.flownet = GMFlow()
         self.metricnet = MetricNet()
@@ -74,15 +74,15 @@ class GMFSS(nn.Module):
         trt_version = getattr(torch_tensorrt, "__version__", "unknown")
         rtx_version = getattr(tensorrt_rtx, "__version__", "unknown")
 
-        # FeatureNet consumes the two frames as one batch. MetricNet operates
-        # at half input resolution; GridNet receives its four pyramid inputs
-        # at 1x, 1/2x, and 1/4x of that half-resolution image.
+        # FeatureNet is run one frame at a time to reduce peak activation
+        # memory. MetricNet operates at half input resolution; GridNet receives
+        # its four pyramid inputs at 1x, 1/2x, and 1/4x of that image.
         h2, w2 = input_height // 2, input_width // 2
         h4, w4 = h2 // 2, w2 // 2
         h8, w8 = h4 // 2, w4 // 2
         examples = {
             "feat_ext": (
-                torch.randn((2, 3, input_height, input_width), device=device, dtype=dtype).contiguous(
+                torch.randn((1, 3, input_height, input_width), device=device, dtype=dtype).contiguous(
                     memory_format=torch.channels_last
                 ),
             ),
@@ -206,15 +206,11 @@ class GMFSS(nn.Module):
         self._tensorrt_compiled = True
 
     def reuse(self, img0, img1):
-        # FeatureNet is fully convolutional and both frames have identical
-        # shapes. A single batch-2 invocation reduces Python/dispatcher and
-        # kernel-launch overhead compared with two batch-1 calls.
-        features = self.feat_ext(torch.cat((img0, img1), dim=0))
-        feat_ext0, feat_ext1 = [], []
-        for feature in features:
-            feat0, feat1 = torch.chunk(feature, 2, dim=0)
-            feat_ext0.append(feat0)
-            feat_ext1.append(feat1)
+        # Run FeatureNet sequentially for each frame. This keeps its
+        # intermediate activations at batch size 1 instead of batch size 2,
+        # reducing peak memory while preserving the same feature tensors.
+        feat_ext0 = self.feat_ext(img0)
+        feat_ext1 = self.feat_ext(img1)
 
         img0 = F.interpolate(img0, scale_factor = 0.5, mode="bilinear")
         img1 = F.interpolate(img1, scale_factor = 0.5, mode="bilinear")

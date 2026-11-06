@@ -30,7 +30,6 @@ def gmfss_fortuna(
     fps_num: int | None = None,
     fps_den: int | None = None,
     scale: float = 1.0,
-    ensemble: bool = False,
     sc: bool = True,
     sc_threshold: float | None = None,
     trt: bool = False,
@@ -58,7 +57,6 @@ def gmfss_fortuna(
     :param fps_den:                 Denominator of target frame rate.
     :param scale:                   Control the process resolution for optical flow model. Try scale=0.5 for 4K video.
                                     Must be 0.25, 0.5, 1.0, 2.0, or 4.0.
-    :param ensemble:                Smooth predictions in areas where the estimation is uncertain.
     :param sc:                      Avoid interpolating frames over scene changes.
     :param sc_threshold:            Threshold for scene change detection. Must be between 0.0 and 1.0.
                                     Leave it None if the clip already has _SceneChangeNext properly set.
@@ -130,7 +128,7 @@ def gmfss_fortuna(
 
     model_type = "base" if model == 0 else "union"
 
-    module = GMFSS(model_dir, model_type, scale, ensemble)
+    module = GMFSS(model_dir, model_type, scale)
     module.eval().to(device, memory_format=torch.channels_last)
     if fp16:
         module.half()
