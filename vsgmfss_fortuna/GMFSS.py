@@ -35,14 +35,19 @@ class GMFSS(nn.Module):
         self.scale = scale
         self._tensorrt_compiled = False
 
-    def compile_tensorrt(self, workspace_size=1 << 30, runtime_cache_path=None, optimization_level=3):
-        """Enable the optional Torch-TensorRT-RTX backend for selected modules.
+    def compile_tensorrt(
+        self,
+        input_height,
+        input_width,
+        cache_dir=None,
+        workspace_size=1 << 30,
+        optimization_level=3,
+    ):
+        """Compile selected modules and persist/reload their TensorRT engines.
 
-        GMFlow, IFNet, frame orchestration, and CuPy soft-splat remain eager.
-        Only FeatureNet, MetricNet, and GridNet are compiled. This deliberately
-        limits graph capture to convolutional modules with tensor-only inputs
-        and outputs; unsupported operators in those graphs may still fall back
-        to PyTorch according to Torch-TensorRT's Dynamo settings.
+        Cache entries are static-shape and keyed by model, dtype, GPU,
+        software versions, and builder settings. GMFlow, IFNet, frame
+        orchestration, and CuPy soft-splat remain eager.
         """
         if self._tensorrt_compiled:
             return
@@ -56,76 +61,124 @@ class GMFSS(nn.Module):
                 "Install the 'tensorrt-rtx' optional dependency."
             ) from exc
 
-        # Torch-TensorRT's Dynamo settings evolve between releases. Only pass
-        # options exposed by the installed version to avoid version-specific
-        # keyword failures.
-        settings_type = getattr(
-            getattr(torch_tensorrt, "dynamo", None),
-            "CompilationSettings",
-            None,
-        )
-        try:
-            available_settings = {field.name for field in fields(settings_type)}
-        except (TypeError, AttributeError):
-            available_settings = set()
+        import hashlib
+        import json
+        import tempfile
+        import warnings
 
-        requested_options = {
-            "workspace_size": int(workspace_size),
-            "optimization_level": int(optimization_level),
-            "num_avg_timing_iters": 1,
+        device = next(self.parameters()).device
+        dtype = next(self.parameters()).dtype
+        gpu_name = torch.cuda.get_device_name(device)
+        capability = torch.cuda.get_device_capability(device)
+        trt_version = getattr(torch_tensorrt, "__version__", "unknown")
+        rtx_version = getattr(tensorrt_rtx, "__version__", "unknown")
+
+        # FeatureNet consumes the two frames as one batch. MetricNet operates
+        # at half input resolution; GridNet receives its four pyramid inputs
+        # at 1x, 1/2x, and 1/4x of that half-resolution image.
+        h2, w2 = input_height // 2, input_width // 2
+        h4, w4 = h2 // 2, w2 // 2
+        h8, w8 = h4 // 2, w4 // 2
+        examples = {
+            "feat_ext": (
+                torch.randn((2, 3, input_height, input_width), device=device, dtype=dtype,
+                            memory_format=torch.channels_last),
+            ),
+            "metricnet": (
+                torch.randn((1, 3, h2, w2), device=device, dtype=dtype, memory_format=torch.channels_last),
+                torch.randn((1, 3, h2, w2), device=device, dtype=dtype, memory_format=torch.channels_last),
+                torch.randn((1, 2, h2, w2), device=device, dtype=dtype, memory_format=torch.channels_last),
+                torch.randn((1, 2, h2, w2), device=device, dtype=dtype, memory_format=torch.channels_last),
+            ),
+            "fusionnet": (
+                torch.randn((1, 12 if self.model_type == "base" else 9, h2, w2), device=device, dtype=dtype, memory_format=torch.channels_last),
+                torch.randn((1, 128, h2, w2), device=device, dtype=dtype, memory_format=torch.channels_last),
+                torch.randn((1, 256, h4, w4), device=device, dtype=dtype, memory_format=torch.channels_last),
+                torch.randn((1, 384, h8, w8), device=device, dtype=dtype, memory_format=torch.channels_last),
+            ),
         }
-        # Some Torch-TensorRT-RTX releases expose runtime_cache_path as a
-        # compile setting. Other releases expose only the runtime-settings API,
-        # which cannot be applied to torch.compile's lazy wrapper before its
-        # first inference has created TRT engines. In that case, retain the
-        # backend's default runtime cache rather than failing model setup.
-        runtime_cache_supported = runtime_cache_path is None or (
-            "runtime_cache_path" in available_settings
-        )
-        if runtime_cache_path is not None and runtime_cache_supported:
-            requested_options["runtime_cache_path"] = str(runtime_cache_path)
 
-        base_options = {
-            name: value
-            for name, value in requested_options.items()
-            if name in available_settings
-        }
+        if cache_dir is not None:
+            os.makedirs(cache_dir, exist_ok=True)
 
-        # Do not compile GMFlow or IFNet here: their correlation / flow
-        # refinement graphs are substantially more complex and remain on the
-        # tested PyTorch CUDA path.
         for name in ("feat_ext", "metricnet", "fusionnet"):
-            component = getattr(self, name)
-            component_options = dict(base_options)
-
-            if "enabled_precisions" in available_settings:
-                try:
-                    component_dtype = next(component.parameters()).dtype
-                except StopIteration:
-                    component_dtype = torch.float32
-                component_options["enabled_precisions"] = {component_dtype}
-
-            compiled_component = torch.compile(
-                component,
-                backend="tensorrt",
-                dynamic=False,
-                options=component_options,
+            component = getattr(self, name).eval()
+            component_inputs = examples[name]
+            cache_identity = {
+                "component": name,
+                "model": self.model_type,
+                "shape": [list(t.shape) for t in component_inputs],
+                "dtype": str(dtype),
+                "gpu": gpu_name,
+                "compute_capability": capability,
+                "torch": torch.__version__,
+                "torch_tensorrt": trt_version,
+                "tensorrt_rtx": rtx_version,
+                "workspace_size": int(workspace_size),
+                "optimization_level": int(optimization_level),
+            }
+            cache_key = hashlib.sha256(
+                json.dumps(cache_identity, sort_keys=True).encode("utf-8")
+            ).hexdigest()[:20]
+            engine_path = (
+                os.path.join(cache_dir, f"gmfss_{name}_{cache_key}.ts")
+                if cache_dir is not None else None
             )
+
+            if engine_path is not None and os.path.isfile(engine_path):
+                try:
+                    compiled_component = torch.jit.load(engine_path, map_location=device).eval()
+                    setattr(self, name, compiled_component)
+                    continue
+                except Exception as exc:
+                    warnings.warn(
+                        f"Could not load cached TensorRT engine {engine_path}: {exc}. "
+                        "Rebuilding it.",
+                        RuntimeWarning,
+                        stacklevel=2,
+                    )
+                    try:
+                        os.remove(engine_path)
+                    except OSError:
+                        pass
+
+            exported = torch.export.export(component, component_inputs)
+            compile_options = {
+                "workspace_size": int(workspace_size),
+                "optimization_level": int(optimization_level),
+                "num_avg_timing_iters": 1,
+                "enabled_precisions": {dtype},
+            }
+            compiled_component = torch_tensorrt.dynamo.compile(
+                exported,
+                inputs=component_inputs,
+                **compile_options,
+            ).eval()
+
+            if engine_path is not None:
+                # Save to a temporary file first so an interrupted write never
+                # leaves a partial cache entry that looks valid on next launch.
+                fd, temporary_path = tempfile.mkstemp(
+                    prefix=".gmfss_engine_", suffix=".ts", dir=cache_dir
+                )
+                os.close(fd)
+                try:
+                    torch_tensorrt.save(
+                        compiled_component,
+                        temporary_path,
+                        output_format="torchscript",
+                        inputs=component_inputs,
+                    )
+                    os.replace(temporary_path, engine_path)
+                finally:
+                    if os.path.exists(temporary_path):
+                        os.remove(temporary_path)
+
+                # Use the serialized artifact for this run too, ensuring that
+                # cache load and cache creation follow the same execution path.
+                compiled_component = torch.jit.load(engine_path, map_location=device).eval()
 
             setattr(self, name, compiled_component)
-
-        if runtime_cache_path is not None and not runtime_cache_supported:
-            import warnings
-
-            warnings.warn(
-                "This Torch-TensorRT version does not expose runtime_cache_path "
-                "through CompilationSettings. Its runtime-settings API requires "
-                "already-created TensorRT engines and cannot be applied safely "
-                "to this lazy torch.compile backend during setup. Continuing with "
-                "the default TensorRT-RTX runtime cache; trt_cache_dir is ignored.",
-                RuntimeWarning,
-                stacklevel=2,
-            )
 
         self._tensorrt_compiled = True
 
