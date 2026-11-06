@@ -135,13 +135,13 @@ class GMFSS(nn.Module):
                 json.dumps(cache_identity, sort_keys=True).encode("utf-8")
             ).hexdigest()[:20]
             engine_path = (
-                os.path.join(cache_dir, f"gmfss_{name}_{cache_key}.ts")
+                os.path.join(cache_dir, f"gmfss_{name}_{cache_key}.ep")
                 if cache_dir is not None else None
             )
 
             if engine_path is not None and os.path.isfile(engine_path):
                 try:
-                    compiled_component = torch.jit.load(engine_path, map_location=device).eval()
+                    compiled_component = torch.export.load(engine_path).module().eval()
                     setattr(self, name, compiled_component)
                     continue
                 except Exception as exc:
@@ -182,14 +182,14 @@ class GMFSS(nn.Module):
                 # Save to a temporary file first so an interrupted write never
                 # leaves a partial cache entry that looks valid on next launch.
                 fd, temporary_path = tempfile.mkstemp(
-                    prefix=".gmfss_engine_", suffix=".ts", dir=cache_dir
+                    prefix=".gmfss_engine_", suffix=".ep", dir=cache_dir
                 )
                 os.close(fd)
                 try:
                     torch_tensorrt.save(
                         compiled_component,
                         temporary_path,
-                        output_format="torchscript",
+                        output_format="exported_program",
                         inputs=component_inputs,
                     )
                     os.replace(temporary_path, engine_path)
