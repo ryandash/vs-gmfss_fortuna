@@ -36,11 +36,12 @@ class GMFSS(nn.Module):
         self._tensorrt_compiled = False
 
     def compile_tensorrt(self, workspace_size=1 << 30):
-        """Compile each neural network independently with Torch-TensorRT.
+        """Compile the convolutional components that have a stable TRT path.
 
-        GMFSS.forward stays in eager PyTorch so custom CuPy soft-splat kernels
-        and tensor orchestration are not captured into one oversized graph.
-        Each compiled component still consumes and returns CUDA tensors.
+        GMFlow and IFNet remain eager: GMFlow contains large correlation and
+        custom flow-upsampling graphs that have repeatedly caused expensive
+        or unsuccessful TensorRT tactic builds on the target RTX GPU.
+        GMFSS.forward and the CuPy soft-splat operations also remain eager.
         """
         if self._tensorrt_compiled:
             return
@@ -52,24 +53,34 @@ class GMFSS(nn.Module):
         }
         requested_options = {
             "workspace_size": int(workspace_size),
-            # A moderate search level avoids the most memory-intensive tactic
-            # search while retaining normal TensorRT graph optimizations.
-            "optimization_level": 3,
+            "optimization_level": 1,
             "num_avg_timing_iters": 1,
         }
-        options = {
+        base_options = {
             name: value
             for name, value in requested_options.items()
             if name in available_settings
         }
 
-        components = ["feat_ext", "flownet", "metricnet"]
-        if self.model_type == "union":
-            components.append("ifnet")
-        components.append("fusionnet")
+        # Start with the components that have completed engine builds in
+        # target-hardware testing. Keep optical-flow and IFNet execution eager
+        # until they have independent correctness and performance coverage.
+        components = ["feat_ext", "metricnet", "fusionnet"]
 
         for name in components:
             component = getattr(self, name)
+            component_options = dict(base_options)
+
+            # The Dynamo settings default to FP32. Explicitly permit the
+            # component's actual parameter precision, especially for FP16
+            # VapourSynth RGBH input.
+            if "enabled_precisions" in available_settings:
+                try:
+                    component_dtype = next(component.parameters()).dtype
+                except StopIteration:
+                    component_dtype = torch.float32
+                component_options["enabled_precisions"] = {component_dtype}
+
             setattr(
                 self,
                 name,
@@ -77,7 +88,7 @@ class GMFSS(nn.Module):
                     component,
                     backend="tensorrt",
                     dynamic=False,
-                    options=options,
+                    options=component_options,
                 ),
             )
 
