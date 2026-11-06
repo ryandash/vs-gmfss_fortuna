@@ -15,13 +15,13 @@ torch.fx.wrap('warp')
 
 
 class GMFSS(nn.Module):
-    def __init__(self, model_dir, model_type, scale, ensemble):
+    def __init__(self, model_dir, model_type, scale):
         super(GMFSS, self).__init__()
         if model_type == 'base':
             from .FusionNet_b import GridNet
         else:
             from .FusionNet_u import GridNet
-            self.ifnet = IFNet(ensemble)
+            self.ifnet = IFNet()
             self.ifnet.load_state_dict(torch.load(os.path.join(model_dir, 'rife.pkl'), map_location='cpu'))
         self.flownet = GMFlow()
         self.metricnet = MetricNet()
