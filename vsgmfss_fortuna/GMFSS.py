@@ -82,8 +82,9 @@ class GMFSS(nn.Module):
         h8, w8 = h4 // 2, w4 // 2
         examples = {
             "feat_ext": (
-                torch.randn((2, 3, input_height, input_width), device=device, dtype=dtype,
-                            memory_format=torch.channels_last),
+                torch.randn((2, 3, input_height, input_width), device=device, dtype=dtype).contiguous(
+                    memory_format=torch.channels_last
+                ),
             ),
             "metricnet": (
                 torch.randn((1, 3, h2, w2), device=device, dtype=dtype).contiguous(memory_format=torch.channels_last),
