@@ -51,14 +51,10 @@ def cuda_kernel(strFunction:str, strKernel:str, objVariables:typing.Dict):
         elif type(objValue) == str:
             strKey += objValue
 
-        elif type(objValue) == torch.Tensor:
+        elif isinstance(objValue, torch.Tensor):
             strKey += str(objValue.dtype)
             strKey += str(objValue.shape)
             strKey += str(objValue.stride())
-
-        elif True:
-            print(strVariable, type(objValue))
-            assert(False)
 
         # end
     # end
@@ -84,31 +80,32 @@ def cuda_kernel(strFunction:str, strKernel:str, objVariables:typing.Dict):
             elif type(objValue) == str:
                 strKernel = strKernel.replace('{{' + strVariable + '}}', objValue)
 
-            elif type(objValue) == torch.Tensor and objValue.dtype == torch.uint8:
+            elif isinstance(objValue, torch.Tensor) and objValue.dtype == torch.uint8:
                 strKernel = strKernel.replace('{{type}}', 'unsigned char')
 
-            elif type(objValue) == torch.Tensor and objValue.dtype == torch.float16:
+            elif isinstance(objValue, torch.Tensor) and objValue.dtype == torch.float16:
                 strKernel = strKernel.replace('{{type}}', 'half')
 
-            elif type(objValue) == torch.Tensor and objValue.dtype == torch.float32:
+            elif isinstance(objValue, torch.Tensor) and objValue.dtype == torch.float32:
                 strKernel = strKernel.replace('{{type}}', 'float')
 
-            elif type(objValue) == torch.Tensor and objValue.dtype == torch.float64:
+            elif isinstance(objValue, torch.Tensor) and objValue.dtype == torch.float64:
                 strKernel = strKernel.replace('{{type}}', 'double')
 
-            elif type(objValue) == torch.Tensor and objValue.dtype == torch.int32:
+            elif isinstance(objValue, torch.Tensor) and objValue.dtype == torch.int32:
                 strKernel = strKernel.replace('{{type}}', 'int')
 
-            elif type(objValue) == torch.Tensor and objValue.dtype == torch.int64:
+            elif isinstance(objValue, torch.Tensor) and objValue.dtype == torch.int64:
                 strKernel = strKernel.replace('{{type}}', 'long')
 
-            elif type(objValue) == torch.Tensor:
-                print(strVariable, objValue.dtype)
-                assert(False)
+            elif isinstance(objValue, torch.Tensor):
+                raise TypeError(f"Unsupported CUDA kernel tensor dtype: {objValue.dtype}")
 
-            elif True:
-                print(strVariable, type(objValue))
-                assert(False)
+            else:
+                raise TypeError(
+                    f"Unsupported CUDA kernel variable: {strVariable} "
+                    f"({type(objValue).__name__})"
+                )
 
             # end
         # end
@@ -234,7 +231,7 @@ def cuda_launch(strKey:str):
 
 ##########################################################
 
-
+@torch._dynamo.disable
 def softsplat(tenIn:torch.Tensor, tenFlow:torch.Tensor, tenMetric:torch.Tensor, strMode:str):
     assert(strMode.split('-')[0] in ['sum', 'avg', 'linear', 'soft'])
 
@@ -246,7 +243,9 @@ def softsplat(tenIn:torch.Tensor, tenFlow:torch.Tensor, tenMetric:torch.Tensor, 
     orig_dtype = tenIn.dtype
     tenIn = tenIn.float()
     tenFlow = tenFlow.float()
-    tenMetric = tenMetric.float()
+
+    if tenMetric is not None:
+        tenMetric = tenMetric.float()
 
     if strMode == 'avg':
         tenIn = torch.cat([tenIn, tenIn.new_ones([tenIn.shape[0], 1, tenIn.shape[2], tenIn.shape[3]])], 1)
