@@ -49,13 +49,13 @@ TensorRT-RTX acceleration is opt-in. If engine compilation or inference fails, r
 
 ### Troubleshooting a missing TensorRT backend
 
-After installing the RTX extra, verify that importing Torch-TensorRT succeeds and registers the `tensorrt` Dynamo backend:
+After installing the RTX extra, verify that the explicit Dynamo compile and serialization APIs are available:
 
 ```powershell
-python -c "import torch; import torch_tensorrt; import tensorrt_rtx; print('Torch:', torch.__version__); print('Torch-TensorRT:', torch_tensorrt.__file__); print('TensorRT-RTX:', tensorrt_rtx.__file__); print('Backends:', torch._dynamo.list_backends())"
+python -c "import torch; import torch_tensorrt; import tensorrt_rtx; print('Torch:', torch.__version__); print('Torch-TensorRT:', torch_tensorrt.__file__); print('TensorRT-RTX:', tensorrt_rtx.__file__); print('Dynamo compile:', callable(torch_tensorrt.dynamo.compile)); print('Save:', callable(torch_tensorrt.save))"
 ```
 
-The backend list should include `tensorrt`. If `torch_tensorrt` imports as a namespace package (for example, `torch_tensorrt.__file__` is `None`) or its package files are missing, the wheel may have been incompletely installed. Reinstall the **same version already selected for the environment** without changing its dependencies:
+Both API checks should print `True`. If `torch_tensorrt` imports as a namespace package (for example, `torch_tensorrt.__file__` is `None`) or the APIs are missing, the wheel may have been incompletely installed. Reinstall the **same version already selected for the environment** without changing its dependencies:
 
 ```powershell
 python -m pip install --pre torch torchvision torch_tensorrt_rtx --extra-index-url https://download.pytorch.org/whl/nightly/cu132
