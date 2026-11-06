@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 
 import collections
+import functools
 import os
 import re
 import typing
@@ -9,6 +10,16 @@ import cupy
 import torch
 
 ##########################################################
+
+
+# Use the unified AMP API when available (PyTorch 2.x), while retaining
+# compatibility with older PyTorch releases supported by this project.
+if hasattr(torch, 'amp') and hasattr(torch.amp, 'custom_fwd'):
+    custom_fwd = functools.partial(torch.amp.custom_fwd, device_type='cuda')
+    custom_bwd = functools.partial(torch.amp.custom_bwd, device_type='cuda')
+else:
+    custom_fwd = torch.cuda.amp.custom_fwd
+    custom_bwd = torch.cuda.amp.custom_bwd
 
 
 objCudacache = {}
@@ -114,7 +125,7 @@ def cuda_kernel(strFunction:str, strKernel:str, objVariables:typing.Dict):
         # end
 
         while True:
-            objMatch = re.search('(SIZE_)([0-4])(\()([^\)]*)(\))', strKernel)
+            objMatch = re.search(r'(SIZE_)([0-4])(\()([^\)]*)(\))', strKernel)
 
             if objMatch is None:
                 break
@@ -129,7 +140,7 @@ def cuda_kernel(strFunction:str, strKernel:str, objVariables:typing.Dict):
         # end
 
         while True:
-            objMatch = re.search('(OFFSET_)([0-4])(\()', strKernel)
+            objMatch = re.search(r'(OFFSET_)([0-4])(\()', strKernel)
 
             if objMatch is None:
                 break
@@ -168,7 +179,7 @@ def cuda_kernel(strFunction:str, strKernel:str, objVariables:typing.Dict):
         # end
 
         while True:
-            objMatch = re.search('(VALUE_)([0-4])(\()', strKernel)
+            objMatch = re.search(r'(VALUE_)([0-4])(\()', strKernel)
 
             if objMatch is None:
                 break
@@ -222,7 +233,15 @@ def cuda_launch(strKey:str):
         os.environ['CUDA_HOME'] = cupy.cuda.get_cuda_path()
     # end
 
-    return cupy.cuda.compile_with_cache(objCudacache[strKey]['strKernel'], tuple(['-I ' + os.environ['CUDA_HOME'], '-I ' + os.environ['CUDA_HOME'] + '/include'])).get_function(objCudacache[strKey]['strFunction'])
+    cuda_home = os.environ['CUDA_HOME']
+    module = cupy.RawModule(
+        code=objCudacache[strKey]['strKernel'],
+        options=(
+            '-I' + cuda_home,
+            '-I' + os.path.join(cuda_home, 'include'),
+        ),
+    )
+    return module.get_function(objCudacache[strKey]['strFunction'])
 # end
 
 
@@ -281,7 +300,7 @@ def softsplat(tenIn:torch.Tensor, tenFlow:torch.Tensor, tenMetric:torch.Tensor, 
 
 class softsplat_func(torch.autograd.Function):
     @staticmethod
-    @torch.cuda.amp.custom_fwd(cast_inputs=torch.float32)
+    @custom_fwd(cast_inputs=torch.float32)
     def forward(self, tenIn, tenFlow):
         tenOut = tenIn.new_zeros([tenIn.shape[0], tenIn.shape[1], tenIn.shape[2], tenIn.shape[3]])
 
@@ -360,7 +379,7 @@ class softsplat_func(torch.autograd.Function):
     # end
 
     @staticmethod
-    @torch.cuda.amp.custom_bwd
+    @custom_bwd
     def backward(self, tenOutgrad):
         tenIn, tenFlow = self.saved_tensors
 
