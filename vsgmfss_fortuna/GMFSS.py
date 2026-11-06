@@ -1,4 +1,5 @@
 import os
+from dataclasses import fields
 
 import torch
 import torch.nn as nn
@@ -32,6 +33,79 @@ class GMFSS(nn.Module):
         self.fusionnet.load_state_dict(torch.load(os.path.join(model_dir, f'fusionnet_{model_type}.pkl'), map_location='cpu'))
         self.model_type = model_type
         self.scale = scale
+        self._tensorrt_compiled = False
+
+    def compile_tensorrt(self, workspace_size=1 << 30):
+        """Enable the optional Torch-TensorRT-RTX backend for selected modules.
+
+        GMFlow, IFNet, frame orchestration, and CuPy soft-splat remain eager.
+        Only FeatureNet, MetricNet, and GridNet are compiled. This deliberately
+        limits graph capture to convolutional modules with tensor-only inputs
+        and outputs; unsupported operators in those graphs may still fall back
+        to PyTorch according to Torch-TensorRT's Dynamo settings.
+        """
+        if self._tensorrt_compiled:
+            return
+
+        try:
+            import tensorrt_rtx  # noqa: F401
+            import torch_tensorrt
+        except ImportError as exc:
+            raise RuntimeError(
+                "TensorRT-RTX was requested, but its Python packages are missing. "
+                "Install the 'tensorrt-rtx' optional dependency."
+            ) from exc
+
+        # Torch-TensorRT's Dynamo settings evolve between releases. Only pass
+        # options exposed by the installed version to avoid version-specific
+        # keyword failures.
+        settings_type = getattr(
+            getattr(torch_tensorrt, "dynamo", None),
+            "CompilationSettings",
+            None,
+        )
+        try:
+            available_settings = {field.name for field in fields(settings_type)}
+        except (TypeError, AttributeError):
+            available_settings = set()
+
+        requested_options = {
+            "workspace_size": int(workspace_size),
+            "optimization_level": 1,
+            "num_avg_timing_iters": 1,
+        }
+        base_options = {
+            name: value
+            for name, value in requested_options.items()
+            if name in available_settings
+        }
+
+        # Do not compile GMFlow or IFNet here: their correlation / flow
+        # refinement graphs are substantially more complex and remain on the
+        # tested PyTorch CUDA path.
+        for name in ("feat_ext", "metricnet", "fusionnet"):
+            component = getattr(self, name)
+            component_options = dict(base_options)
+
+            if "enabled_precisions" in available_settings:
+                try:
+                    component_dtype = next(component.parameters()).dtype
+                except StopIteration:
+                    component_dtype = torch.float32
+                component_options["enabled_precisions"] = {component_dtype}
+
+            setattr(
+                self,
+                name,
+                torch.compile(
+                    component,
+                    backend="tensorrt",
+                    dynamic=False,
+                    options=component_options,
+                ),
+            )
+
+        self._tensorrt_compiled = True
 
     def reuse(self, img0, img1):
         feat11, feat12, feat13 = self.feat_ext(img0)
