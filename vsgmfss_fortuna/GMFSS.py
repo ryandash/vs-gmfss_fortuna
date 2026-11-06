@@ -142,6 +142,12 @@ class GMFSS(nn.Module):
                     except OSError:
                         pass
 
+            if name == "metricnet":
+                # MetricNet's backwarp uses a module-global shape cache.
+                # Populate it before export so tracing does not capture a
+                # dictionary mutation or a cache-miss branch.
+                prepare_backwarp_grid(component_inputs[2])
+
             exported = torch.export.export(component, component_inputs)
             compile_options = {
                 "workspace_size": int(workspace_size),
