@@ -46,7 +46,7 @@ def gmfss_fortuna(
     :param num_streams:             Number of CUDA streams to enqueue the kernels.
     :param trt:                     Use optional Torch-TensorRT-RTX acceleration for selected network components.
     :param trt_max_workspace_size:  Maximum TensorRT tactic workspace, in bytes, per compiled component.
-    :param trt_cache_dir:           Optional directory for the TensorRT cache file (gmfss_timing.cache).
+    :param trt_cache_dir:           Optional directory for the TensorRT-RTX runtime cache file (gmfss_runtime.cache).
     :param trt_optimization_level:  TensorRT builder optimization level, from 0 (fastest build) to 5 (longest build / potentially fastest engine).
     :param model:                   Model to use.
                                     0 = base model
@@ -110,13 +110,13 @@ def gmfss_fortuna(
     if trt_optimization_level not in range(6):
         raise vs.Error("gmfss_fortuna: trt_optimization_level must be between 0 and 5")
 
-    trt_cache_path = None
+    trt_runtime_cache_path = None
     if trt_cache_dir is not None:
         if not isinstance(trt_cache_dir, (str, os.PathLike)) or not os.fspath(trt_cache_dir).strip():
             raise vs.Error("gmfss_fortuna: trt_cache_dir must be a non-empty directory path or None")
         trt_cache_dir = os.path.abspath(os.path.expanduser(os.fspath(trt_cache_dir)))
         os.makedirs(trt_cache_dir, exist_ok=True)
-        trt_cache_path = os.path.join(trt_cache_dir, "gmfss_timing.cache")
+        trt_runtime_cache_path = os.path.join(trt_cache_dir, "gmfss_runtime.cache")
 
     if trt and not hasattr(torch, "compile"):
         raise vs.Error("gmfss_fortuna: TensorRT acceleration requires PyTorch 2.0 or newer")
@@ -142,7 +142,7 @@ def gmfss_fortuna(
         try:
             module.compile_tensorrt(
                 workspace_size=trt_max_workspace_size,
-                timing_cache_path=trt_cache_path,
+                runtime_cache_path=trt_runtime_cache_path,
                 optimization_level=trt_optimization_level,
             )
         except RuntimeError as exc:
