@@ -55,11 +55,14 @@ clip = gmfss_fortuna(
     trt=False,
     model=1,
     scale=1.0,
+    ensemble=False,
     num_streams=1,
     trt_optimization_level=3,
 )
 ```
 
 Set `trt=True` if using TensorRT-RTX version
+
+Set `ensemble=True` to enable bidirectional IFNet ensemble when using the union model (`model=1`). It is disabled by default to preserve the original performance profile.
 
 See `vsgmfss_fortuna/__init__.py` for all available parameters.
