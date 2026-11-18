@@ -11,9 +11,14 @@ torch.fx.wrap('forward_backward_consistency_check')
 backwarp_tenGrid = {}
 
 
+def _backwarp_grid_key(tenflow):
+    """Return a cache key that distinguishes shape, device, and dtype."""
+    return (tuple(tenflow.shape), tenflow.device, tenflow.dtype)
+
+
 def prepare_backwarp_grid(tenflow):
     """Populate the grid cache before entering a torch.compile region."""
-    key = str(tenflow.shape)
+    key = _backwarp_grid_key(tenflow)
     if key not in backwarp_tenGrid:
         tenHor = torch.linspace(start=-1.0, end=1.0, steps=tenflow.shape[3], dtype=tenflow.dtype, device=tenflow.device).view(1, 1, 1, -1).repeat(1, 1, tenflow.shape[2], 1)
         tenVer = torch.linspace(start=-1.0, end=1.0, steps=tenflow.shape[2], dtype=tenflow.dtype, device=tenflow.device).view(1, 1, -1, 1).repeat(1, 1, 1, tenflow.shape[3])
@@ -22,9 +27,9 @@ def prepare_backwarp_grid(tenflow):
 
 
 def backwarp(tenIn, tenflow):
-    prepare_backwarp_grid(tenflow)
+    grid = prepare_backwarp_grid(tenflow)
     tenflow = torch.cat([tenflow[:, 0:1, :, :] / ((tenIn.shape[3] - 1.0) / 2.0), tenflow[:, 1:2, :, :] / ((tenIn.shape[2] - 1.0) / 2.0)], 1)
-    return torch.nn.functional.grid_sample(input=tenIn, grid=(backwarp_tenGrid[str(tenflow.shape)] + tenflow).permute(0, 2, 3, 1), mode='bilinear', padding_mode='zeros', align_corners=True)
+    return torch.nn.functional.grid_sample(input=tenIn, grid=(grid + tenflow).permute(0, 2, 3, 1), mode='bilinear', padding_mode='zeros', align_corners=True)
 
 
 class MetricNet(nn.Module):
