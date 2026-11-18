@@ -55,7 +55,7 @@ class GMFSS(nn.Module):
         workspace_size=1 << 30,
         optimization_level=3,
     ):
-        """Compile selected modules and persist/reload their TensorRT engines.
+        """Compile model networks and persist/reload their TensorRT engines.
 
         Compile every PyTorch network used by the selected model: GMFlow,
         FeatureNet, MetricNet, FusionNet, and (for the union model) IFNet.
@@ -193,21 +193,27 @@ class GMFSS(nn.Module):
                 # dictionary mutation or a cache-miss branch.
                 prepare_backwarp_grid(component_inputs[2])
 
-            exported = torch.export.export(component, component_inputs)
-            compile_options = {
-                "workspace_size": int(workspace_size),
-                "optimization_level": int(optimization_level),
-                "num_avg_timing_iters": 1,
-                "enabled_precisions": {dtype},
-            }
-            compiled_component = torch_tensorrt.dynamo.compile(
-                exported,
-                component_inputs,
-                device=device,
-                min_block_size=1,
-                use_explicit_typing=True,
-                **compile_options,
-            ).eval()
+            try:
+                exported = torch.export.export(component, component_inputs)
+                compile_options = {
+                    "workspace_size": int(workspace_size),
+                    "optimization_level": int(optimization_level),
+                    "num_avg_timing_iters": 1,
+                    "enabled_precisions": {dtype},
+                }
+                compiled_component = torch_tensorrt.dynamo.compile(
+                    exported,
+                    component_inputs,
+                    device=device,
+                    min_block_size=1,
+                    use_explicit_typing=True,
+                    **compile_options,
+                ).eval()
+            except Exception as exc:
+                raise RuntimeError(
+                    f"TensorRT export/compilation failed for component '{name}' "
+                    f"with static input shapes {[tuple(t.shape) for t in component_inputs]}: {exc}"
+                ) from exc
 
             if engine_path is not None:
                 # Save to a temporary file first so an interrupted write never
