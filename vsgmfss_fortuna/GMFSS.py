@@ -14,6 +14,17 @@ from .softsplat import softsplat as warp
 torch.fx.wrap('warp')
 
 
+class _BidirectionalGMFlow(nn.Module):
+    """Fix GMFlow's bidirectional inference mode as a static export-time choice."""
+
+    def __init__(self, model):
+        super().__init__()
+        self.model = model
+
+    def forward(self, img0, img1):
+        return self.model(img0, img1, pred_bidir_flow=True)
+
+
 class GMFSS(nn.Module):
     def __init__(self, model_dir, model_type, scale, ensemble=False):
         super(GMFSS, self).__init__()
@@ -44,11 +55,12 @@ class GMFSS(nn.Module):
         workspace_size=1 << 30,
         optimization_level=3,
     ):
-        """Compile selected modules and persist/reload their TensorRT engines.
+        """Compile model networks and persist/reload their TensorRT engines.
 
-        Cache entries are static-shape and keyed by model, dtype, GPU,
-        software versions, and builder settings. GMFlow, IFNet, frame
-        orchestration, and CuPy soft-splat remain eager.
+        Compile every PyTorch network used by the selected model: GMFlow,
+        FeatureNet, MetricNet, FusionNet, and (for the union model) IFNet.
+        Frame orchestration and the custom CuPy soft-splat operator remain
+        outside TensorRT. Engines are static-shape and cache-keyed.
         """
         if self._tensorrt_compiled:
             return
@@ -80,7 +92,12 @@ class GMFSS(nn.Module):
         h2, w2 = input_height // 2, input_width // 2
         h4, w4 = h2 // 2, w2 // 2
         h8, w8 = h4 // 2, w4 // 2
+        flow_h, flow_w = int(h2 * self.scale), int(w2 * self.scale)
         examples = {
+            "flownet": (
+                torch.randn((1, 3, flow_h, flow_w), device=device, dtype=dtype).contiguous(memory_format=torch.channels_last),
+                torch.randn((1, 3, flow_h, flow_w), device=device, dtype=dtype).contiguous(memory_format=torch.channels_last),
+            ),
             "feat_ext": (
                 torch.randn((1, 3, input_height, input_width), device=device, dtype=dtype).contiguous(
                     memory_format=torch.channels_last
@@ -99,17 +116,31 @@ class GMFSS(nn.Module):
                 torch.randn((1, 384, h8, w8), device=device, dtype=dtype).contiguous(memory_format=torch.channels_last),
             ),
         }
+        if self.model_type == "union":
+            examples["ifnet"] = (
+                torch.randn((1, 3, h2, w2), device=device, dtype=dtype).contiguous(memory_format=torch.channels_last),
+                torch.randn((1, 3, h2, w2), device=device, dtype=dtype).contiguous(memory_format=torch.channels_last),
+                torch.tensor([0.5], device=device, dtype=dtype),
+            )
 
         if cache_dir is not None:
             os.makedirs(cache_dir, exist_ok=True)
 
-        for name in ("feat_ext", "metricnet", "fusionnet"):
+        component_names = ["flownet", "feat_ext", "metricnet", "fusionnet"]
+        if self.model_type == "union":
+            component_names.append("ifnet")
+
+        for name in component_names:
             component = getattr(self, name).eval()
+            if name == "flownet":
+                component = _BidirectionalGMFlow(component).eval()
             component_inputs = examples[name]
             checkpoint_names = {
+                "flownet": "flownet.pkl",
                 "feat_ext": f"feat_{self.model_type}.pkl",
                 "metricnet": f"metric_{self.model_type}.pkl",
                 "fusionnet": f"fusionnet_{self.model_type}.pkl",
+                "ifnet": "rife.pkl",
             }
             checkpoint_path = os.path.join(self.model_dir, checkpoint_names[name])
             checkpoint_hash = hashlib.sha256()
@@ -162,21 +193,27 @@ class GMFSS(nn.Module):
                 # dictionary mutation or a cache-miss branch.
                 prepare_backwarp_grid(component_inputs[2])
 
-            exported = torch.export.export(component, component_inputs)
-            compile_options = {
-                "workspace_size": int(workspace_size),
-                "optimization_level": int(optimization_level),
-                "num_avg_timing_iters": 1,
-                "enabled_precisions": {dtype},
-            }
-            compiled_component = torch_tensorrt.dynamo.compile(
-                exported,
-                component_inputs,
-                device=device,
-                min_block_size=1,
-                use_explicit_typing=True,
-                **compile_options,
-            ).eval()
+            try:
+                exported = torch.export.export(component, component_inputs)
+                compile_options = {
+                    "workspace_size": int(workspace_size),
+                    "optimization_level": int(optimization_level),
+                    "num_avg_timing_iters": 1,
+                    "enabled_precisions": {dtype},
+                }
+                compiled_component = torch_tensorrt.dynamo.compile(
+                    exported,
+                    component_inputs,
+                    device=device,
+                    min_block_size=1,
+                    use_explicit_typing=True,
+                    **compile_options,
+                ).eval()
+            except Exception as exc:
+                raise RuntimeError(
+                    f"TensorRT export/compilation failed for component '{name}' "
+                    f"with static input shapes {[tuple(t.shape) for t in component_inputs]}: {exc}"
+                ) from exc
 
             if engine_path is not None:
                 # Save to a temporary file first so an interrupted write never
@@ -225,7 +262,11 @@ class GMFSS(nn.Module):
         # GMFlow has a native bidirectional mode. It shares the image
         # backbone pass and derives the reverse global correlation by
         # transposing the forward correlation matrix.
-        flow_bidir = self.flownet(imgf0, imgf1, pred_bidir_flow=True)
+        flow_bidir = (
+            self.flownet(imgf0, imgf1)
+            if self._tensorrt_compiled
+            else self.flownet(imgf0, imgf1, pred_bidir_flow=True)
+        )
         flow01, flow10 = torch.chunk(flow_bidir, 2, dim=0)
 
         if self.scale != 1.0:
