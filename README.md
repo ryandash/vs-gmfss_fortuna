@@ -11,6 +11,10 @@ The All-In-One GMFSS: Dedicated for Anime Video Frame Interpolation, based on [9
 
 The default inference path uses PyTorch with CUDA acceleration. TensorRT-RTX is optional and is only required when `trt=True` is requested.
 
+When enabled, TensorRT targets every PyTorch network in the selected model: GMFlow, FeatureNet, MetricNet, and FusionNet; the union model also compiles IFNet. The VapourSynth/frame orchestration and the custom CuPy soft-splat operator remain outside TensorRT. Engines are currently built for the padded input resolution and precision selected by the clip, and are static-shape.
+
+GMFlow contains substantial attention, correlation, sampling, and shape-dependent operations. Export/compiler support varies by the installed PyTorch and Torch-TensorRT-RTX versions. If an operation is unsupported, setup reports the component and input shapes that failed; it does not silently claim full TensorRT execution. Validate both base and union models on the target GPU before production use.
+
 ## Installation
 
 Run the following commands using the Python interpreter bundled with your VapourSynth portable installation.
@@ -61,7 +65,7 @@ clip = gmfss_fortuna(
 )
 ```
 
-Set `trt=True` if using TensorRT-RTX version
+Set `trt=True` to compile the model's supported PyTorch network components with TensorRT-RTX. The custom CuPy soft-splat kernel remains a CUDA kernel and is not a TensorRT engine.
 
 Set `ensemble=True` to enable bidirectional IFNet ensemble when using the union model (`model=1`). It is disabled by default to preserve the original performance profile.
 
